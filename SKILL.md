@@ -14,6 +14,27 @@ log in as the user, watch/download video. Pick the lightest tool that works.
 
 `SD="${CLAUDE_SKILL_DIR}"` — all scripts live in `$SD/scripts/`.
 
+## Consuming content? Prefer the `consume` skill
+
+If the goal is to **study/transcribe/summarize/analyze** a video or social post
+(YouTube, Instagram, TikTok, X, Reddit, LinkedIn, **or a course with a Panda
+Video / converteai player like cademi**) — rather than raw-scrape a page — use the
+**`consume` skill**, not surf's primitives. It pulls transcript-first, on demand,
+with timestamps, and already knows each platform's auth quirks. Surf is the
+fallback for the *web at large* (arbitrary sites, listings, dashboards, anti-bot
+pages); `consume` is purpose-built for media and is the better tool there.
+
+Use surf alongside `consume` only for its one missing piece on **IP-bound course
+pages** (cademi etc., where exported cookies bounce to login): the lesson stream
+is a cross-origin Panda/converteai iframe, so you must read the iframe `src` from
+the user's *real logged-in browser* (Claude-in-Chrome extension:
+`[...document.querySelectorAll('iframe')].map(f=>f.src)`), then hand that
+`scripts.converteai.net/.../embed.html` URL to `consume`'s
+`scripts/platforms/course/lesson.py` — it pulls the stream from the **public CDN**
+(`cdn.converteai.net/.../main.m3u8`, only a `Referer` needed, no login) and
+transcribes. Don't try cloud Browser Run on the course page itself — it's
+IP-bound and will hit the login wall.
+
 ## One-time setup (per machine)
 
 Browser Run needs Cloudflare creds (free plan works). If `python3 "$SD/scripts/lib/config.py"`
