@@ -173,8 +173,24 @@ const ctx = await chromium.launchPersistentContext(path.join(userDataDir, profil
   headless: !has('--headed'),
   channel: 'chrome',           // the user's real Chrome, not bundled Chromium
   viewport: { width: 1440, height: 900 },
-  args: ['--no-first-run', '--no-default-browser-check'],
+  args: [
+    '--no-first-run', '--no-default-browser-check',
+    // This launches alongside the user's own Chrome, which may already hold
+    // dozens of tabs. Cap our footprint so we never compete it out of memory.
+    '--memory-pressure-off', '--js-flags=--max-old-space-size=512',
+    '--disable-extensions', '--disable-background-networking',
+    '--disable-dev-shm-usage',
+  ],
 });
+
+// A run should never outlive its task; a stuck page would otherwise keep a
+// headed Chrome alive indefinitely.
+const HARD_LIMIT = Number(opt('--max-seconds', 90)) * 1000;
+const watchdog = setTimeout(() => {
+  console.log(`TIMEOUT after ${HARD_LIMIT / 1000}s — closing browser`);
+  ctx.close().catch(() => {}).finally(() => process.exit(1));
+}, HARD_LIMIT);
+watchdog.unref?.();
 
 // Cookies come from cookies.py (yt-dlp + keyring) already decrypted — the copied
 // Cookies file can't be read by a fresh profile, see the header note.
@@ -212,6 +228,12 @@ if (cookieDomain) {
     console.log(`COOKIES_FAIL ${String(e.message).split('\n')[0]}`);
   }
 }
+
+// Everything past this point must run inside try/finally: an uncaught throw
+// would leave a headed Chrome running with no owner, and those pile up fast
+// (a real crash: several --headed runs in a row exhausted memory).
+let exitCode = 0;
+try {
 
 const page = ctx.pages()[0] || await ctx.newPage();
 
@@ -268,4 +290,11 @@ if (opt('--screenshot')) {
 
 if (netRx) console.log('NETWORK ' + JSON.stringify([...new Set(captured)], null, 2));
 
-await ctx.close();
+} catch (e) {
+  console.log(`FATAL ${e.message}`);
+  exitCode = 1;
+} finally {
+  // close() can itself hang on a wedged renderer; don't let cleanup block forever.
+  await Promise.race([ctx.close(), new Promise(r => setTimeout(r, 5000))]).catch(() => {});
+  process.exit(exitCode);
+}
