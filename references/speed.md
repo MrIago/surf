@@ -19,6 +19,23 @@ Read the middle row carefully: **changing the method bought 5x; changing the too
 bought 4x more.** The method fix is the one that matters, because it costs
 nothing and works on every site — including the ones where scripts get blocked.
 
+### Second benchmark: a logged-in course page (cademi)
+
+Reaching a lesson page behind a paid login and pulling the player's iframe src —
+the step that gates transcribing a course. Same lesson, all three routes:
+
+| Route | Time |
+|---|---|
+| `local_pw.mjs --cookies … --eval` | **~6s** |
+| `cf.py content --cookies` (cloud Browser Run) | ~15s |
+| extension + `javascript_tool` | ~32s |
+
+Two lessons here. First, the ordering flips from the ML case: this page doesn't
+fight bots, so the script wins outright and even the *cloud* beats the extension.
+Choose per site, not by a fixed ranking. Second, the skill's own docs had claimed
+this page was IP-bound and reachable only via the extension — it isn't. When a
+doc says "impossible", re-test before designing around it.
+
 ## The order of attack
 
 1. **Query the DOM, don't look at pixels.** `javascript_tool` (extension),

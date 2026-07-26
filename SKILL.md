@@ -24,16 +24,24 @@ with timestamps, and already knows each platform's auth quirks. Surf is the
 fallback for the *web at large* (arbitrary sites, listings, dashboards, anti-bot
 pages); `consume` is purpose-built for media and is the better tool there.
 
-Use surf alongside `consume` only for its one missing piece on **IP-bound course
-pages** (cademi etc., where exported cookies bounce to login): the lesson stream
-is a cross-origin Panda/converteai iframe, so you must read the iframe `src` from
-the user's *real logged-in browser* (Claude-in-Chrome extension:
-`[...document.querySelectorAll('iframe')].map(f=>f.src)`), then hand that
-`scripts.converteai.net/.../embed.html` URL to `consume`'s
-`scripts/platforms/course/lesson.py` — it pulls the stream from the **public CDN**
-(`cdn.converteai.net/.../main.m3u8`, only a `Referer` needed, no login) and
-transcribes. Don't try cloud Browser Run on the course page itself — it's
-IP-bound and will hit the login wall.
+Use surf alongside `consume` for **course pages** (cademi etc.): the lesson stream
+is a cross-origin Panda/converteai iframe, so read the iframe `src` off the
+logged-in lesson page, then hand that `scripts.converteai.net/.../embed.html` URL
+to `consume`'s `scripts/platforms/course/lesson.py` — it pulls the stream from the
+**public CDN** (`cdn.converteai.net/.../main.m3u8`, only a `Referer` needed, no
+login) and transcribes.
+
+All three routes reach the lesson page; measured on cademi, same lesson:
+
+| Route | Time to the iframe src |
+|---|---|
+| `local_pw.mjs --cookies cademi.com.br --eval '…iframe…'` | **~6s** |
+| `cf.py content <url> --cookies cademi.com.br` (cloud) | ~15s |
+| extension + `javascript_tool` | ~32s |
+
+(An earlier note here said the page was IP-bound and only the extension could
+reach it. Not true — cookie injection works. Keep the extension as the fallback
+for when a platform really does bind the session to the live browser.)
 
 ## One-time setup (per machine)
 
