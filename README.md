@@ -20,7 +20,8 @@ Plain `WebFetch` gets 403 on anti-bot walls and never executes JavaScript. surf 
 - The REST path (`cf.py`, stdlib-only Python) does one navigate plus one action per call: markdown, rendered HTML, screenshot, AI extraction, links, scrape, PDF. It retries 429s with backoff.
 - The CDP driver (`cf_cdp.mjs`) connects Playwright to the same cloud browser over WebSocket and executes a JSON action list (click by text, type, scroll, dismiss the consent banner) in a single run, with zero model round-trips between steps.
 - `--capture-net '<regex>'` records matching network requests while the page runs. This is how surf finds video streams behind custom players: the m3u8 never appears in the HTML, it appears on the wire.
-- Cookie injection (`cookies.py`) exports your live session from Chrome via yt-dlp and injects it into the cloud browser. Verified on Airbnb: the cloud render showed the user's member price (R$550) where the public page showed R$631.
+- Cookie injection (`cookies.py`) exports your live session from Chrome via yt-dlp and injects it into the cloud browser. Verified on Airbnb: the cloud render showed the user's member price (R$550) where the public page showed R$631. `lib/chrome_cookies.py` does the same decrypt in ~0.1s instead of ~12s, since loading yt-dlp to read a SQLite file dominates the cost.
+- Local Playwright (`local_pw.mjs`) runs your own Chrome, logged in, from a **copy** of the profile, so your browser stays open while a script drives another. It syncs only auth-bearing files and only the target host's IndexedDB (31MB, ~2.6s here, versus 561MB if you copy every origin). One call navigates, acts, and extracts: measured 2.1s for a scrape that a screenshot-driven agent loop takes minutes to do.
 - The auth map is documented and tested: cookie sessions work in the cloud; IP-bound cookies (LinkedIn) need local curl from your machine; IndexedDB sessions (WhatsApp Web) need the extension or a protocol library. `references/auth-and-cookies.md` covers which is which and why.
 
 ## Usage
@@ -44,18 +45,51 @@ surf needs Cloudflare **Browser Run** credentials (the free plan works). When as
 ```bash
 python3 scripts/lib/config.py CF_ACCOUNT_ID=... CF_API_TOKEN=...
 # optional:
-python3 scripts/lib/config.py GROQ_API_KEY=gsk_...           # video transcription
-python3 scripts/lib/config.py SURF_COOKIES_BROWSER="chrome:Profile 1"  # which profile for logged-in renders
+python3 scripts/lib/config.py GROQ_API_KEY=gsk_...   # video transcription
 ```
 
 Keys load from the environment first, then `~/.config/surf/.env`. Nothing is hardcoded, so the same skill works on any machine.
 
+#### Which Chrome profile? (do this if you want logged-in pages)
+
+Anything that renders **as you** — `cf.py --cookies`, `local_pw.mjs` — reads your
+local Chrome. Browsers usually hold several profiles, and `Default` is often the
+*work* account rather than the one you mean, so point surf at the right one:
+
+```bash
+# list your profiles and the account in each:
+python3 -c "import json,os;print('\n'.join(f\"{k:12} {v.get('user_name','-')}\" for k,v in json.load(open(os.path.expanduser('~/.config/google-chrome/Local State')))['profile']['info_cache'].items()))"
+
+python3 scripts/lib/config.py SURF_COOKIES_BROWSER="chrome:Profile 1"
+```
+
+Every script reads that one setting, so cookies and the local browser can't end
+up on different accounts. On macOS the path is
+`~/Library/Application Support/Google/Chrome/Local State`; on Windows,
+`%LOCALAPPDATA%/Google/Chrome/User Data/Local State`. Other browsers: `firefox`,
+`edge` (profile syntax is the same).
+
+Nothing is uploaded: cookies are read locally and injected into a browser you
+control. `local_pw.mjs` works off a **copy** of the profile in `~/.cache/surf/`
+so your own Chrome can stay open; delete that directory any time.
+
 ### Requirements
 
-- **Node** (the interactive driver installs `playwright-core` once: `npm i` in `scripts/`, or `npm i -g playwright-core`)
+- **Node** (the interactive drivers install `playwright-core` once: `npm i` in `scripts/`, or `npm i -g playwright-core`)
 - **curl**
-- For video / cookies / reference images: **ffmpeg**, **yt-dlp** (`pip install yt-dlp`). On Linux, reading Chrome cookies also needs `secretstorage`
+- For video / reference images: **ffmpeg**, **yt-dlp** (`pip install yt-dlp`)
+- For logged-in rendering: **cryptography** (`pip install cryptography`) to decrypt
+  Chrome's cookies, plus **secretstorage** on Linux (`pip install secretstorage`)
+  to read the keyring. Without them surf falls back to yt-dlp, which works but
+  costs ~12s per call instead of ~0.1s
+- `local_pw.mjs` also needs a local **Chrome** install (it launches `channel: 'chrome'`)
 - The Claude-in-Chrome route needs the extension plus a direct Anthropic plan
+
+Check what's missing on your machine:
+
+```bash
+python3 scripts/lib/chrome_cookies.py github.com   # prints "<n> cookies" if the decrypt path works
+```
 
 ### Commands
 
@@ -71,6 +105,8 @@ python3 $SD/cf.py json "<url>" --prompt "extract price, title, rating"
 python3 $SD/cf.py markdown "<url>" --cookies airbnb.com.br   # render LOGGED IN
 node    $SD/cf_cdp.mjs --url "<url>" --consent --capture-net 'm3u8|mp4' --actions '[{"do":"click","text":"show all photos"}]'
 python3 $SD/images.py "sao januario stadium" --download 6    # real reference images + contact sheet
+node    $SD/local_pw.mjs --url "<url>" --cookies <domain> \
+        --eval '() => [...document.querySelectorAll(".item")].map(e => e.innerText)'   # logged-in, ~2s
 python3 $SD/video.py "<url>" --transcribe --frames 8         # download + transcript + frames
 python3 $SD/live_view.py "<url>"                             # CAPTCHA/QR: a link you act on
 ```

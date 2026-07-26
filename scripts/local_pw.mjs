@@ -181,18 +181,25 @@ const ctx = await chromium.launchPersistentContext(path.join(userDataDir, profil
 const cookieDomain = opt('--cookies');
 if (cookieDomain) {
   try {
-    let raw;
+    const parse = (s) => JSON.parse(s.slice(s.indexOf('[')));
+    let jar;
     try {
       // Fast path: decrypt straight from Chrome's SQLite (~0.1s).
-      raw = execFileSync('python3',
+      jar = parse(execFileSync('python3',
         [path.join(__dirname, 'lib', 'chrome_cookies.py'), cookieDomain, '--json',
-         '--profile', profileName], { encoding: 'utf8' });
+         '--profile', profileName], { encoding: 'utf8' }));
     } catch {
-      // Fallback: yt-dlp path (~12s, but handles browsers/setups we don't).
-      raw = execFileSync('python3',
-        [path.join(__dirname, 'cookies.py'), cookieDomain, '--json'], { encoding: 'utf8' });
+      jar = [];
     }
-    const jar = JSON.parse(raw.slice(raw.indexOf('[')));
+    // An empty jar means either "no session for this domain" or a missing
+    // crypto dep — both are worth one shot at the slow path before giving up.
+    if (!jar.length) {
+      try {
+        jar = parse(execFileSync('python3',
+          [path.join(__dirname, 'cookies.py'), cookieDomain, '--json'], { encoding: 'utf8' }));
+        if (jar.length) console.log('COOKIES_VIA fallback (yt-dlp) — install `cryptography` for the fast path');
+      } catch { /* neither path found cookies; continue logged-out */ }
+    }
     await ctx.addCookies(jar.map(c => ({
       name: c.name, value: c.value,
       domain: c.domain, path: c.path || '/',
