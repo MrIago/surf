@@ -45,16 +45,20 @@ def chrome_root() -> str:
     return os.path.join(home, ".config/google-chrome")
 
 
-def keyring_password() -> bytes:
-    """The 'Chrome Safe Storage' secret from the OS keyring."""
+def keyring_password() -> list[bytes]:
+    """Candidate 'Safe Storage' secrets from the OS keyring, best guess first."""
     if sys.platform == "darwin":
         out = subprocess.run(
             ["security", "find-generic-password", "-w", "-s", "Chrome Safe Storage"],
             capture_output=True, text=True)
         if out.returncode == 0:
-            return out.stdout.strip().encode()
-        return b"peanuts"
+            return [out.stdout.strip().encode(), b"peanuts"]
+        return [b"peanuts"]
     # Linux: try secretstorage (gnome-keyring), then the documented fallback.
+    # A keyring usually holds SEVERAL of these (Chrome, Chromium, and stale
+    # duplicates), so collect them all and let the caller pick the one that
+    # actually decrypts — grabbing the first match silently yields garbage.
+    found = []
     try:
         import secretstorage  # type: ignore
         bus = secretstorage.dbus_init()
@@ -62,11 +66,23 @@ def keyring_password() -> bytes:
             if coll.is_locked():
                 continue
             for item in coll.get_all_items():
-                if item.get_label() in ("Chrome Safe Storage", "Chromium Safe Storage"):
-                    return item.get_secret()
+                label = item.get_label()
+                if "Safe Storage" not in label:
+                    continue
+                secret = item.get_secret()
+                # Chrome's own key first, then Chromium's, then anything else.
+                rank = 0 if label == "Chrome Safe Storage" else (1 if "Chromium" in label else 2)
+                found.append((rank, secret))
     except Exception:
         pass
-    return b"peanuts"  # Chrome's fallback when no keyring is available
+    found.sort(key=lambda x: x[0])
+    seen, out = set(), []
+    for _, s in found:
+        if s not in seen:
+            seen.add(s)
+            out.append(s)
+    out.append(b"peanuts")  # Chrome's fallback when no keyring is available
+    return out
 
 
 def decrypt(encrypted: bytes, key: bytes) -> str:
@@ -96,10 +112,16 @@ def decrypt(encrypted: bytes, key: bytes) -> str:
     return text
 
 
+def looks_decrypted(s: str) -> bool:
+    """A correct AES key yields printable text; a wrong one yields binary noise."""
+    return bool(s) and all(c == "\t" or c == " " or c.isprintable() for c in s)
+
+
 def read(domain: str, profile: str = "Default") -> list[dict]:
     from hashlib import pbkdf2_hmac
-    key = pbkdf2_hmac("sha1", keyring_password(), b"saltysalt",
-                      1003 if sys.platform == "darwin" else 1, 16)
+    keys = [pbkdf2_hmac("sha1", pw, b"saltysalt",
+                        1003 if sys.platform == "darwin" else 1, 16)
+            for pw in keyring_password()]
 
     db = os.path.join(chrome_root(), profile, "Cookies")
     if not os.path.exists(db):
@@ -118,11 +140,23 @@ def read(domain: str, profile: str = "Default") -> list[dict]:
     con.close()
     shutil.rmtree(os.path.dirname(tmp), ignore_errors=True)
 
+    # Pick the key that actually works on this profile: try each candidate on a
+    # sample of encrypted values and keep the one yielding printable text.
+    key = keys[0]
+    sample = [r[3] for r in rows if r[3]][:5]
+    if sample:
+        for k in keys:
+            if sum(looks_decrypted(decrypt(e, k)) for e in sample) > len(sample) // 2:
+                key = k
+                break
+
     SAMESITE = {-1: "Lax", 0: "None", 1: "Lax", 2: "Strict"}
     out = []
     for host, name, val, enc, pth, exp, secure, httponly, samesite in rows:
         value = val or decrypt(enc, key)
-        if not value:
+        # A value that didn't decrypt cleanly is binary garbage; sending it to a
+        # browser fails with "Invalid cookie fields" (a real, silent breakage).
+        if not value or not looks_decrypted(value):
             continue
         out.append({
             "name": name, "value": value, "domain": host, "path": pth or "/",
