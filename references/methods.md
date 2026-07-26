@@ -69,7 +69,11 @@ occupies the user's machine.
 ## 4. Local Playwright, real session (`local_pw.mjs`)
 
 "The extension, but as a script": the user's own logins, their IP, and no model
-round-trip between steps. Measured 2.1s for a job an extension loop took minutes on.
+round-trip between steps. **Not the default** — see the decision summary below.
+Measured 7.4s on a Mercado Livre search where the extension driven properly
+(`javascript_tool`) took 30s, and driven by screenshots took 2min29s. Worth it
+for bulk or unattended work; not worth the bot walls and the extra Chrome for a
+one-off page.
 
 **How it dodges the profile lock.** Chrome locks its profile dir, so pointing
 Playwright at the live one would force the user to close their browser. Instead
@@ -107,8 +111,15 @@ phone-linked-app specifics and the Baileys alternative.
 
 ## Decision summary
 
-- Public/cookie-login, read or extract → **REST (cf.py)**.
-- Need to interact / find a stream, from a cloud IP → **CDP (cf_cdp.mjs)**.
-- Logged-in as the user, multi-step, or IP-bound site → **local_pw.mjs**.
-- Must be visible/native, phone-linked live session, or console/network debug → **extension**.
+- Logged into the site, or the site fights bots → **extension** + `javascript_tool`
+  (the default: real Chrome, no auth plumbing, nothing to detect).
+- Public page, read or extract → **REST (cf.py)**; needs clicks or network
+  capture → **CDP (cf_cdp.mjs)**. Both keep it off the user's machine.
+- Dozens of pages, or a long unattended run, on a site that tolerates headless →
+  **local_pw.mjs**.
+- Phone-linked live session, or console/network debugging → **extension**.
 - CAPTCHA / QR / login wall → **Live View**, user acts, then continue.
+
+Measured (Mercado Livre search, same extraction): extension screenshot-loop
+2min29s → extension + `javascript_tool` 30s → `local_pw.mjs` 7.4s. Fix the method
+before reaching for another tool; see `speed.md`.

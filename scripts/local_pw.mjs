@@ -1,7 +1,14 @@
 // surf · local Playwright driving a COPY of the user's real Chrome profile.
 // "The extension, but as a script": native logins (cookies + localStorage +
 // IndexedDB, so it survives token-in-storage sites) with zero model round-trips
-// between steps — the fastest path for a logged-in multi-step task.
+// between steps.
+//
+// NOT the default. The Claude-in-Chrome extension is usually the better call for
+// logged-in work: it IS the user's Chrome, so no bot wall, no auth plumbing, no
+// second browser competing for RAM. Use this when round-trips genuinely dominate
+// (dozens of pages, long unattended runs) on a site that tolerates it. Measured:
+// extension+javascript_tool 30s vs this 7.4s on the same search — but Shopee
+// blocks this outright and Mercado Livre needs --headed. See references/speed.md.
 //
 // Why a copy: Chrome locks its profile directory, so pointing Playwright at the
 // live one would force the user to close their browser. We sync only the ~100MB

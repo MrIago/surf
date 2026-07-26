@@ -49,37 +49,50 @@ python3 "$SD/scripts/lib/config.py" CF_ACCOUNT_ID=... CF_API_TOKEN=...
 
 Node scripts need `playwright-core` once: `npm i -g playwright-core` (or in `$SD/scripts/`).
 
-## Speed first — collapse round-trips (details: `references/speed.md`)
+## Speed first — the method matters more than the tool (`references/speed.md`)
 
-Browser work drags because each tool call is a model round-trip. A task done as
-screenshot→look→click cycles costs minutes; the same task as **one script call**
-costs seconds (measured: 2.1s vs a published 13-min extension run, same job).
-So, in order:
+Browser work drags because of *how* it's driven, not which browser drives it.
+Same search on Mercado Livre, same extraction, measured end to end:
 
-1. **Prefer a script over the extension.** One invocation navigates + acts +
-   extracts, with no round-trip between steps.
-2. **Query the DOM, don't read pixels** — `--eval` / `page.evaluate` /
-   `javascript_tool` returns clean JSON in one call. Screenshots cost a
-   round-trip *and* image tokens.
-3. **Batch** what must be interactive (`browser_batch`, `--actions`).
-4. **Target by ref/selector/text**, never guessed coordinates (they drift).
-5. **Screenshot last**, only for genuinely visual questions.
+| | Time |
+|---|---|
+| Extension, screenshot→look→scroll→look loop | **2min29s** |
+| Extension + `javascript_tool` (one DOM query) | **30s** |
+| `local_pw.mjs --eval` (no round-trips at all) | **7.4s** |
+
+Switching *method* bought 5x; switching *tool* bought 4x more. So fix the method
+first — it works everywhere, including on sites that block scripts outright:
+
+1. **Query the DOM, don't read pixels.** `javascript_tool` / `--eval` /
+   `page.evaluate` returns clean JSON in one call. Screenshots cost a round-trip
+   *and* image tokens, then a second call to act on what you saw.
+2. **Batch** what must be interactive (`browser_batch`, `--actions`).
+3. **Target by ref/selector/text**, never guessed coordinates (they drift).
+4. **Screenshot last**, only for genuinely visual questions ("does this look
+   right"), never to extract text.
 
 ## Which tool — decide first (full matrix: `references/methods.md`)
 
 | Task | Tool |
 |------|------|
-| Read / screenshot / extract data, fast, public **or cookie-login** site | **Browser Run REST** (`cf.py`) |
-| Need to click/type/scroll, dynamic content, capture network, find a video | **Browser Run CDP** (`cf_cdp.mjs`) |
-| **Logged-in as the user**, multi-step, or the site is **IP-bound** (LinkedIn) | **local Playwright** (`local_pw.mjs`) — native session, no round-trips |
-| Site the user is already logged into and you want it **native/visible**, or debug console/network | **Claude-in-Chrome extension** (`mcp__claude-in-chrome__*`) |
-| **Phone-linked app** (WhatsApp/Telegram Web) | **extension** or Baileys — the profile copy does *not* carry these (tested); see `references/auth-and-cookies.md` |
+| **Anything on a site the user is logged into, or that fights bots** | **extension** + `javascript_tool` — their real Chrome, so no auth plumbing and nothing to detect |
+| Public page: read / screenshot / extract, no login needed | **Browser Run REST** (`cf.py`) — cloud, doesn't touch their machine |
+| Public page needing clicks/dynamic content/network capture | **Browser Run CDP** (`cf_cdp.mjs`) |
+| **Bulk** (dozens of pages), long unattended runs, or a site needing their IP that tolerates headless | **local Playwright** (`local_pw.mjs`) — no round-trips, but see the caveats |
+| **Phone-linked app** (WhatsApp/Telegram Web) | **extension** or Baileys — the profile copy does *not* carry these (tested) |
 | CAPTCHA, login wall, or a QR to scan | **Live View** (`live_view.py`) → user solves, then continue |
 
-Cloud (Browser Run) doesn't touch the user's machine and scales, but uses a cloud
-IP and only does cookie-auth. `local_pw.mjs` gives their real session and their IP
-at script speed. The extension is for when the user must *see* it, or the session
-lives only in that running browser. Default to Browser Run; escalate as needed.
+**Default to the extension for logged-in work.** It is the user's actual browser:
+no cookie export, no profile copy, no bot wall, no second Chrome competing for
+their RAM, and they can watch or take over. Its only weakness is the per-action
+round-trip — which `javascript_tool` + `browser_batch` largely erase (2min29s →
+30s on a real search).
+
+Reach for `local_pw.mjs` when round-trips actually dominate: many pages in a
+batch, or a long run nobody is watching. Know the costs before you do — it
+launches a second Chrome (running several `--headed` sessions has crashed this
+machine), Shopee-class anti-bot blocks it outright, and Mercado Livre needs
+`--headed` to render at all.
 
 ## Common recipes
 
@@ -123,7 +136,20 @@ python3 "$SD/scripts/video.py" "<m3u8-url>" --referer "<player-url>" --transcrib
 ```
 Read the `CONTACT_SHEET` to visually "watch"; read the `TRANSCRIPT` to know what's said.
 
-**Logged-in as the user, at script speed (`local_pw.mjs`):**
+**Logged-in as the user (extension — the default):** load the MCP tools, pick the
+browser, make a tab, then **extract with `javascript_tool`** rather than looking
+at screenshots:
+```js
+// one call returns clean JSON — this is the whole trick
+[...document.querySelectorAll("div.poly-card")].map(el => ({
+  title: el.querySelector(".poly-component__title")?.innerText,
+  price: el.querySelector(".andes-money-amount__fraction")?.innerText,
+})).filter(x => x.title)
+```
+Group navigate/click/wait into one `browser_batch`; keep `javascript_tool`,
+`find` and `read_page` as separate calls (they can't go in a batch).
+
+**Bulk / unattended, at script speed (`local_pw.mjs`):**
 ```bash
 # extract structured data from a page that needs their session — one call, ~2s:
 node "$SD/scripts/local_pw.mjs" --url "<url>" --cookies <domain> \
