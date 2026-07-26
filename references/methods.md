@@ -73,10 +73,18 @@ round-trip between steps. Measured 2.1s for a job an extension loop took minutes
 
 **How it dodges the profile lock.** Chrome locks its profile dir, so pointing
 Playwright at the live one would force the user to close their browser. Instead
-`local_pw.mjs` copies only the auth-bearing files (~109MB of a 2.2GB profile:
-Cookies, Login Data, Local Storage, IndexedDB, Preferences, Network) into
-`~/.cache/surf/pw-profile`, and re-syncs when the copy is >12h old (~1.1s). The
-user never closes anything.
+`local_pw.mjs` copies only the auth-bearing files (Cookies, Login Data, Local
+Storage, Preferences, Network, plus the *target host's* IndexedDB) into
+`~/.cache/surf/pw-profile`, re-syncing when the copy is stale or was built for a
+different host. The user never closes anything. Per-host IndexedDB matters:
+copying every origin costs 561MB/~8s on this machine (WhatsApp history alone is
+412MB) versus 31MB/~2.6s for one host. `--all-idb` opts into the full copy.
+
+**What it does and doesn't authenticate.** Cookie- and localStorage-based
+sessions survive the copy (verified on GitHub and LinkedIn). Phone-linked apps do
+**not**: WhatsApp Web copies its IndexedDB fine but still shows the QR, because
+the session key is in the OS keyring and the device is validated server-side.
+Route those to the extension or Baileys.
 
 **Why cookies are injected separately.** Chrome encrypts cookie values with a
 keyring key tied to the original profile, so the copied `Cookies` file decrypts
@@ -88,7 +96,8 @@ is what keeps token-in-storage and phone-linked sites logged in.
 
 - `--eval '<fn>'` — the fast extractor: one DOM query returns JSON, no screenshot.
 - `--actions` / `--capture-net` / `--consent` / `--screenshot` — same shape as `cf_cdp.mjs`.
-- `--profile "Profile 1"` — the user may have many; pick the one with the session.
+- `--profile <name>` — defaults to the profile in `SURF_COOKIES_BROWSER` (so this
+  and `cookies.py` stay on one account); override when a session lives elsewhere.
 - `--headed` — visible window; also much less bot-like than headless.
 - `--sync` — force a refresh after the user logs into something new.
 

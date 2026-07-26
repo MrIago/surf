@@ -70,9 +70,19 @@ refs. That combination is most of the difference between "13 minutes" and "fast"
 - **`cookies.py` costs ~12s** (yt-dlp import) — `lib/chrome_cookies.py` does the
   same in ~0.1s. `local_pw.mjs` already prefers the fast one; don't call the slow
   path directly unless the fast one fails.
-- **The right profile matters.** This machine has 17 Chrome profiles and the
-  session you want may not be in `Default` (e.g. `Default` may hold a work
-  account rather than the personal one). Check before assuming.
+- **WhatsApp Web does NOT survive the profile copy** (tested): its IndexedDB
+  copies fine but the page still shows the QR, because the session key lives in
+  the OS keyring and the device is validated server-side. Use the extension (a
+  live browser) or Baileys — as auth-and-cookies.md already said. Cookie- and
+  localStorage-based sites (GitHub, LinkedIn) do survive.
+- **The right profile matters.** This machine has 17 Chrome profiles; the
+  personal one is often some `Profile N`, while `Default`
+  may be a work account. `local_pw.mjs` and `chrome_cookies.py` both read the
+  profile from `SURF_COOKIES_BROWSER`, so they stay on the same account — but
+  check before assuming when a login "mysteriously" isn't there.
+- **IndexedDB is copied per-host, not wholesale.** Copying all of it costs 561MB
+  and ~8s (WhatsApp history alone is 412MB); the per-host slice is 31MB and
+  ~2.6s. `--all-idb` forces the full copy if a task genuinely spans many origins.
 
 ## Keep this file honest
 

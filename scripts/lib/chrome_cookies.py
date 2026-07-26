@@ -21,6 +21,21 @@ import sys, os, json, sqlite3, shutil, tempfile, subprocess, argparse
 ITERATIONS = {"v10": 1, "v11": 1}  # Linux uses 1 iteration; macOS uses 1003
 
 
+def default_profile() -> str:
+    """Same precedence as local_pw.mjs, so both point at the same account."""
+    if os.environ.get("SURF_LOCAL_PROFILE"):
+        return os.environ["SURF_LOCAL_PROFILE"]
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import config  # type: ignore
+        v = config.get("SURF_COOKIES_BROWSER") or ""
+        if ":" in v:
+            return v.split(":", 1)[1].strip()
+    except Exception:
+        pass
+    return "Default"
+
+
 def chrome_root() -> str:
     home = os.path.expanduser("~")
     if sys.platform == "darwin":
@@ -122,8 +137,10 @@ def read(domain: str, profile: str = "Default") -> list[dict]:
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("domain")
-    ap.add_argument("--profile", default=os.environ.get("SURF_LOCAL_PROFILE", "Default"))
+    ap.add_argument("--profile", default=None,
+                    help="Chrome profile dir (default: SURF_LOCAL_PROFILE, else the "
+                         "profile in SURF_COOKIES_BROWSER, else Default)")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
-    cookies = read(a.domain, a.profile)
+    cookies = read(a.domain, a.profile or default_profile())
     print(json.dumps(cookies, indent=2) if a.json else f"{len(cookies)} cookies for {a.domain}")

@@ -73,7 +73,7 @@ So, in order:
 | Need to click/type/scroll, dynamic content, capture network, find a video | **Browser Run CDP** (`cf_cdp.mjs`) |
 | **Logged-in as the user**, multi-step, or the site is **IP-bound** (LinkedIn) | **local Playwright** (`local_pw.mjs`) — native session, no round-trips |
 | Site the user is already logged into and you want it **native/visible**, or debug console/network | **Claude-in-Chrome extension** (`mcp__claude-in-chrome__*`) |
-| **Phone-linked app** (WhatsApp/Telegram Web) | `local_pw.mjs` (copies IndexedDB) or the extension — see `references/auth-and-cookies.md` |
+| **Phone-linked app** (WhatsApp/Telegram Web) | **extension** or Baileys — the profile copy does *not* carry these (tested); see `references/auth-and-cookies.md` |
 | CAPTCHA, login wall, or a QR to scan | **Live View** (`live_view.py`) → user solves, then continue |
 
 Cloud (Browser Run) doesn't touch the user's machine and scales, but uses a cloud
@@ -134,11 +134,13 @@ node "$SD/scripts/local_pw.mjs" --url "<url>" --cookies <d> --consent \
      --capture-net 'm3u8|mp4' --screenshot /tmp/surf.png
 node "$SD/scripts/local_pw.mjs" --sync          # after the user logs into something new
 ```
-Runs a real Chrome off a **copy** of the user's profile (auto-synced when >12h
-old), so their browser stays open. Cookies are decrypted and injected;
-localStorage/IndexedDB come from the copy, which is what keeps token-in-storage
-and phone-linked sites logged in. `--profile "Profile 1"` picks another profile,
-`--headed` shows the window (and looks far less like a bot).
+Runs a real Chrome off a **copy** of the user's profile (auto-synced when stale),
+so their browser stays open. Cookies are decrypted and injected; localStorage +
+the target host's IndexedDB come from the copy, which covers token-in-storage
+sites. It does **not** carry phone-linked sessions (WhatsApp still asks for the
+QR — use the extension there). The profile follows `SURF_COOKIES_BROWSER`;
+override with `--profile`. `--headed` shows the window (and looks far less like
+a bot); `--all-idb` copies every origin's IndexedDB instead of just the target's.
 
 **CAPTCHA / login / QR scan (human-in-the-loop):**
 ```bash

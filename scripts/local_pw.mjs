@@ -23,6 +23,7 @@
 //   --profile <name>       Chrome profile dir name (default: SURF_LOCAL_PROFILE or "Default")
 //   --sync                 force-refresh the copy before running (do this after a new login)
 //   --cookies <domain>     inject decrypted cookies for this domain (needed for cookie-auth sites)
+//   --all-idb              copy ALL IndexedDB, not just the target host's (slow: WhatsApp alone ~412MB)
 //   --headed               show the window (much better against bot detection; default headless)
 //   --eval '<js>'          run JS in the page and print the JSON result — the FASTEST extractor
 //   --actions '<json>'     [{do:"click",text|selector},{do:"type",selector,text},
@@ -67,6 +68,19 @@ function cacheRoot() {
   return path.join(os.homedir(), '.cache', 'surf', 'pw-profile');
 }
 
+// Which IndexedDB origins to copy: null = all (--all-idb), else a regex built
+// from the target URL's host so we carry just that site's storage.
+function idbFilterFor(url, all) {
+  if (all) return null;
+  try {
+    const host = new URL(url).hostname;
+    const bare = host.replace(/^www\./, '');
+    return new RegExp(bare.replace(/\./g, '\\.'), 'i');
+  } catch {
+    return /$^/;  // no URL yet (e.g. plain --sync): skip IndexedDB entirely
+  }
+}
+
 function syncProfile(profileName, { force = false } = {}) {
   const src = path.join(chromeRoot(), profileName);
   if (!fs.existsSync(src)) {
@@ -78,9 +92,12 @@ function syncProfile(profileName, { force = false } = {}) {
   const dst = path.join(dstRoot, profileName);
   const stamp = path.join(dstRoot, `.synced-${profileName}`);
 
-  // Re-sync when forced, missing, or older than 12h (logins drift/expire).
+  // Re-sync when forced, missing, older than 12h (logins drift/expire), or when
+  // the cached copy was built for a different host (the IndexedDB slice differs).
   const age = fs.existsSync(stamp) ? Date.now() - fs.statSync(stamp).mtimeMs : Infinity;
-  if (!force && age < 12 * 3600 * 1000) return dstRoot;
+  const cachedFor = fs.existsSync(stamp) ? fs.readFileSync(stamp, 'utf8').split('\n')[1] : '';
+  const wantFor = String(idbFilter);
+  if (!force && age < 12 * 3600 * 1000 && cachedFor === wantFor) return dstRoot;
 
   fs.mkdirSync(dst, { recursive: true });
   // "Local State" lives at the User Data root and holds the key that decrypts Cookies.
@@ -90,10 +107,21 @@ function syncProfile(profileName, { force = false } = {}) {
     const s = path.join(src, item);
     if (!fs.existsSync(s)) continue;
     const d = path.join(dst, item);
+    // IndexedDB is mostly app data, not auth (WhatsApp Web alone is ~412MB of
+    // message history). Copy only the origins this run needs, unless --all-idb.
+    if (item === 'IndexedDB' && idbFilter) {
+      fs.mkdirSync(d, { recursive: true });
+      for (const entry of fs.readdirSync(s)) {
+        if (!idbFilter.test(entry)) continue;
+        fs.rmSync(path.join(d, entry), { recursive: true, force: true });
+        fs.cpSync(path.join(s, entry), path.join(d, entry), { recursive: true });
+      }
+      continue;
+    }
     fs.rmSync(d, { recursive: true, force: true });
     fs.cpSync(s, d, { recursive: true });
   }
-  fs.writeFileSync(stamp, new Date().toISOString());
+  fs.writeFileSync(stamp, `${new Date().toISOString()}\n${wantFor}`);
   console.log(`PROFILE_SYNCED ${dst}`);
   return dstRoot;
 }
@@ -118,11 +146,27 @@ async function dismissConsent(page) {
 }
 
 // ---- main ------------------------------------------------------------------
-const profileName = opt('--profile', process.env.SURF_LOCAL_PROFILE || 'Default');
-const userDataDir = syncProfile(profileName, { force: has('--sync') });
-if (has('--sync') && !opt('--url')) process.exit(0);
-
+// Profile precedence: --profile > SURF_LOCAL_PROFILE > the profile half of
+// SURF_COOKIES_BROWSER ("chrome:Profile 1") > "Default". Sharing the last one
+// keeps this script and cookies.py pointed at the same account.
+function configuredProfile() {
+  if (process.env.SURF_LOCAL_PROFILE) return process.env.SURF_LOCAL_PROFILE;
+  try {
+    const v = execFileSync('python3', ['-c',
+      `import sys;sys.path.insert(0,${JSON.stringify(path.join(__dirname, 'lib'))});import config;print(config.get('SURF_COOKIES_BROWSER') or '')`],
+      { encoding: 'utf8' }).trim();
+    if (v.includes(':')) return v.split(':').slice(1).join(':').trim();
+  } catch { /* fall through */ }
+  return 'Default';
+}
+const profileName = opt('--profile', configuredProfile());
 const url = opt('--url');
+const idbFilter = idbFilterFor(url, has('--all-idb'));
+// The IndexedDB slice is per-host, so a copy synced for another site must be
+// refreshed — hence force on every run unless the same host was cached.
+const userDataDir = syncProfile(profileName, { force: has('--sync') });
+if (has('--sync') && !url) process.exit(0);
+
 if (!url) { console.error('[surf] --url required (or --sync alone to refresh the copy)'); process.exit(1); }
 
 const ctx = await chromium.launchPersistentContext(path.join(userDataDir, profileName), {
