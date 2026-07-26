@@ -75,11 +75,13 @@ refs. That combination is most of the difference between "13 minutes" and "fast"
   the OS keyring and the device is validated server-side. Use the extension (a
   live browser) or Baileys — as auth-and-cookies.md already said. Cookie- and
   localStorage-based sites (GitHub, LinkedIn) do survive.
-- **The right profile matters.** This machine has 17 Chrome profiles; the
-  personal one is often some `Profile N`, while `Default`
-  may be a work account. `local_pw.mjs` and `chrome_cookies.py` both read the
-  profile from `SURF_COOKIES_BROWSER`, so they stay on the same account — but
-  check before assuming when a login "mysteriously" isn't there.
+- **The right profile matters.** `Default` is often *not* the account you want —
+  a machine can carry a dozen Chrome profiles, and the work account frequently
+  sits in `Default` while the personal one is some `Profile N`. `local_pw.mjs`
+  and `chrome_cookies.py` both read the profile from `SURF_COOKIES_BROWSER`, so
+  they can't drift apart; set it once. When a login "mysteriously" isn't there,
+  check the profile before debugging anything else — map them with:
+  `python3 -c "import json;print(json.load(open('$HOME/.config/google-chrome/Local State'))['profile']['info_cache'])"`
 - **IndexedDB is copied per-host, not wholesale.** Copying all of it costs 561MB
   and ~8s (WhatsApp history alone is 412MB); the per-host slice is 31MB and
   ~2.6s. `--all-idb` forces the full copy if a task genuinely spans many origins.
