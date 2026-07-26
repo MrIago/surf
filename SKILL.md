@@ -49,19 +49,37 @@ python3 "$SD/scripts/lib/config.py" CF_ACCOUNT_ID=... CF_API_TOKEN=...
 
 Node scripts need `playwright-core` once: `npm i -g playwright-core` (or in `$SD/scripts/`).
 
+## Speed first — collapse round-trips (details: `references/speed.md`)
+
+Browser work drags because each tool call is a model round-trip. A task done as
+screenshot→look→click cycles costs minutes; the same task as **one script call**
+costs seconds (measured: 2.1s vs a published 13-min extension run, same job).
+So, in order:
+
+1. **Prefer a script over the extension.** One invocation navigates + acts +
+   extracts, with no round-trip between steps.
+2. **Query the DOM, don't read pixels** — `--eval` / `page.evaluate` /
+   `javascript_tool` returns clean JSON in one call. Screenshots cost a
+   round-trip *and* image tokens.
+3. **Batch** what must be interactive (`browser_batch`, `--actions`).
+4. **Target by ref/selector/text**, never guessed coordinates (they drift).
+5. **Screenshot last**, only for genuinely visual questions.
+
 ## Which tool — decide first (full matrix: `references/methods.md`)
 
 | Task | Tool |
 |------|------|
 | Read / screenshot / extract data, fast, public **or cookie-login** site | **Browser Run REST** (`cf.py`) |
 | Need to click/type/scroll, dynamic content, capture network, find a video | **Browser Run CDP** (`cf_cdp.mjs`) |
-| Site the user is **already logged into** and you want it native/visible, or debug console/network | **Claude-in-Chrome extension** (`mcp__claude-in-chrome__*`) |
-| **Phone-linked app** (WhatsApp/Telegram Web) | extension, **local Playwright** with the real profile, or a protocol lib (Baileys) — see `references/auth-and-cookies.md` |
+| **Logged-in as the user**, multi-step, or the site is **IP-bound** (LinkedIn) | **local Playwright** (`local_pw.mjs`) — native session, no round-trips |
+| Site the user is already logged into and you want it **native/visible**, or debug console/network | **Claude-in-Chrome extension** (`mcp__claude-in-chrome__*`) |
+| **Phone-linked app** (WhatsApp/Telegram Web) | `local_pw.mjs` (copies IndexedDB) or the extension — see `references/auth-and-cookies.md` |
 | CAPTCHA, login wall, or a QR to scan | **Live View** (`live_view.py`) → user solves, then continue |
 
-Cloud (Browser Run) is fastest and scales and doesn't touch the user's machine,
-but only does cookie-auth. The extension is the only thing that reaches sites the
-user is logged into via phone-link. Default to Browser Run; escalate only when needed.
+Cloud (Browser Run) doesn't touch the user's machine and scales, but uses a cloud
+IP and only does cookie-auth. `local_pw.mjs` gives their real session and their IP
+at script speed. The extension is for when the user must *see* it, or the session
+lives only in that running browser. Default to Browser Run; escalate as needed.
 
 ## Common recipes
 
@@ -105,6 +123,23 @@ python3 "$SD/scripts/video.py" "<m3u8-url>" --referer "<player-url>" --transcrib
 ```
 Read the `CONTACT_SHEET` to visually "watch"; read the `TRANSCRIPT` to know what's said.
 
+**Logged-in as the user, at script speed (`local_pw.mjs`):**
+```bash
+# extract structured data from a page that needs their session — one call, ~2s:
+node "$SD/scripts/local_pw.mjs" --url "<url>" --cookies <domain> \
+     --eval '() => [...document.querySelectorAll(".item")].map(e => ({t: e.innerText}))'
+# multi-step + find a stream, all without model round-trips:
+node "$SD/scripts/local_pw.mjs" --url "<url>" --cookies <d> --consent \
+     --actions '[{"do":"click","text":"see more"},{"do":"scroll","y":2000}]' \
+     --capture-net 'm3u8|mp4' --screenshot /tmp/surf.png
+node "$SD/scripts/local_pw.mjs" --sync          # after the user logs into something new
+```
+Runs a real Chrome off a **copy** of the user's profile (auto-synced when >12h
+old), so their browser stays open. Cookies are decrypted and injected;
+localStorage/IndexedDB come from the copy, which is what keeps token-in-storage
+and phone-linked sites logged in. `--profile "Profile 1"` picks another profile,
+`--headed` shows the window (and looks far less like a bot).
+
 **CAPTCHA / login / QR scan (human-in-the-loop):**
 ```bash
 python3 "$SD/scripts/live_view.py" "<url>"     # prints LIVE_URL
@@ -118,6 +153,9 @@ links a device (e.g. WhatsApp) and how to remove it later.
 **call `list_connected_browsers` then `AskUserQuestion` to let the user pick the
 browser** (required), use `browser_batch` to group steps, and prefer search/`find`
 over coordinate clicks (they drift when lists move). Details: `references/methods.md`.
+For hard-won operating tricks (React-input drift → `javascript_tool` native-setter,
+image upload via the user's OS picker, forcing a SPA link preview, JS URL-privacy
+block), read and keep updating the `browser-extension-tricks` memory.
 
 **Many URLs / bulk:** Browser Run has rate limits (free: ~1 Quick Action / 10s,
 10 min browser/day; paid: 10/s). For a batch, **fetch sequentially with a small
@@ -140,13 +178,17 @@ work-list inline first, then orchestrate the analysis.
 
 `cf.py` (REST: markdown/content/screenshot/json/links/scrape/pdf; `--cookies`,
 `--device mobile`, `--viewport`, `--scale`, `--element`, `--html-file`) ·
-`cf_cdp.mjs` (interactive CDP driver) · `cookies.py` (export browser cookies) ·
-`images.py` (find real reference images) · `video.py` (download+transcribe+frames) ·
-`live_view.py` (captcha/QR session) · `lib/config.py` (keys).
+`cf_cdp.mjs` (interactive CDP driver) · `local_pw.mjs` (local Chrome w/ the user's
+session; `--eval`, `--actions`, `--cookies`, `--sync`, `--headed`) ·
+`cookies.py` (export browser cookies) · `lib/chrome_cookies.py` (fast cookie
+decrypt, ~0.1s vs yt-dlp's ~12s) · `images.py` (find real reference images) ·
+`video.py` (download+transcribe+frames) · `live_view.py` (captcha/QR session) ·
+`lib/config.py` (keys).
 
 ## References (read the one for the step)
 
-- `references/methods.md` — the 4 tools in depth + when-to-use + extension how-to
+- `references/speed.md` — why browser work drags + the order of attack (read when a task feels slow)
+- `references/methods.md` — the tools in depth + when-to-use + extension how-to
 - `references/auth-and-cookies.md` — cookies vs IndexedDB, profiles, phone-linked apps, Baileys
 - `references/video.md` — full video workflow + finding hidden streams
 - `references/pitfalls.md` — consent banners, captcha, rate-limits, click fragility, dead-time

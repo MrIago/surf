@@ -66,19 +66,40 @@ How to use well:
 Downside: slow (each action is a round-trip + screenshot), one browser at a time,
 occupies the user's machine.
 
-## 4. Local Playwright (real profile)
+## 4. Local Playwright, real session (`local_pw.mjs`)
 
-Run Playwright on the user's machine with `launchPersistentContext(userDataDir)`
-pointing at their real Chrome profile — reuses its IndexedDB/localStorage, so it's
-logged into everything (including WhatsApp Web). Scriptable + native logins + fast.
-Downsides: local (their IP/CPU), and the profile must be **closed** (Chrome locks
-it). Essentially "the extension, but as a script." See auth-and-cookies.md for the
+"The extension, but as a script": the user's own logins, their IP, and no model
+round-trip between steps. Measured 2.1s for a job an extension loop took minutes on.
+
+**How it dodges the profile lock.** Chrome locks its profile dir, so pointing
+Playwright at the live one would force the user to close their browser. Instead
+`local_pw.mjs` copies only the auth-bearing files (~109MB of a 2.2GB profile:
+Cookies, Login Data, Local Storage, IndexedDB, Preferences, Network) into
+`~/.cache/surf/pw-profile`, and re-syncs when the copy is >12h old (~1.1s). The
+user never closes anything.
+
+**Why cookies are injected separately.** Chrome encrypts cookie values with a
+keyring key tied to the original profile, so the copied `Cookies` file decrypts
+to empty in a fresh launch (verified). `--cookies <domain>` therefore re-injects
+them decrypted via `lib/chrome_cookies.py` (~0.1s; it reads the SQLite and does
+the AES-CBC itself, vs ~12s for the yt-dlp path in `cookies.py`, kept as fallback).
+localStorage/IndexedDB need no such trick — they're plaintext in the copy, which
+is what keeps token-in-storage and phone-linked sites logged in.
+
+- `--eval '<fn>'` — the fast extractor: one DOM query returns JSON, no screenshot.
+- `--actions` / `--capture-net` / `--consent` / `--screenshot` — same shape as `cf_cdp.mjs`.
+- `--profile "Profile 1"` — the user may have many; pick the one with the session.
+- `--headed` — visible window; also much less bot-like than headless.
+- `--sync` — force a refresh after the user logs into something new.
+
+Downsides: uses their machine/IP, and headless still trips aggressive bot walls
+(use `--headed`, or fall back to the extension). See auth-and-cookies.md for
 phone-linked-app specifics and the Baileys alternative.
 
 ## Decision summary
 
 - Public/cookie-login, read or extract → **REST (cf.py)**.
-- Need to interact / find a stream → **CDP (cf_cdp.mjs)**.
-- Logged-in-by-phone, or want it visible/native, or debug → **extension**.
-- Want native logins in a script → **local Playwright**.
+- Need to interact / find a stream, from a cloud IP → **CDP (cf_cdp.mjs)**.
+- Logged-in as the user, multi-step, or IP-bound site → **local_pw.mjs**.
+- Must be visible/native, phone-linked live session, or console/network debug → **extension**.
 - CAPTCHA / QR / login wall → **Live View**, user acts, then continue.
