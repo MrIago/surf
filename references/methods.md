@@ -1,6 +1,31 @@
-# surf · the four tools, in depth
+# surf · the tools, in depth
 
 All proven against real sites (Airbnb logged-in, a paid course, WhatsApp Web).
+
+## 0. Built-in browser of the Claude desktop app (`mcp__Claude_Browser__*`)
+
+Only in the desktop app's Code tab (since July 2026); absent in a terminal
+session. A tabbed Chromium in the app's Browser pane: the user watches live and can
+take over. **Clean profile**, separate from their Chrome — no saved logins, nothing
+lands in their Chrome history. Default for interactive work.
+
+- Open: `preview_start {url}` (new tab) or `{name}` (dev server from
+  `.claude/launch.json`); `navigate`, `tabs_create/select/close`.
+- Read: `get_page_text`, `read_page` (a11y tree with `ref_N`), `find`,
+  `javascript_tool` (REPL semantics, last expression returned).
+- Act: `computer` (click by `ref`, type, key, scroll, zoom, screenshot with
+  `scale`), `form_input`, `browser_batch` for a sequence in one round-trip.
+- Device: `resize_window` preset `mobile` (375×812, touch, Android UA — reload
+  after switching), `tablet`, `desktop` (resets); `colorScheme light|dark`.
+- Debug: `read_console_messages`, `read_network_requests` (with response bodies).
+- Logins: the user signs in in the pane (OAuth popups work) and turns on **Keep
+  cookies** in the ⋮ menu so it survives restarts. You can't import their Chrome
+  cookies into it (httpOnly). Never type the user's real password yourself; a
+  project's test account is fine on their own app.
+- Permissions: the first action on an external site shows a card (Allow once /
+  Always allow / Deny), per domain including subdomains. Localhost and project files
+  need none. Safety classifiers review clicks/typing on external pages.
+- Limits: no frame export (videos → Playwright, `recording.md`), not for bulk.
 
 ## 1. Cloudflare Browser Run — REST Quick Actions (`cf.py`)
 
@@ -111,8 +136,11 @@ phone-linked-app specifics and the Baileys alternative.
 
 ## Decision summary
 
-- Logged into the site, or the site fights bots → **extension** + `javascript_tool`
-  (the default: real Chrome, no auth plumbing, nothing to detect).
+- Interactive, visible, the user watching (their app, docs, any site) → **built-in
+  browser** (desktop app). Login needed → the user signs in in the pane once.
+- Data from a site they're logged into in Chrome, headless → **local_pw.mjs
+  --cookies**.
+- Act as the user in their real Chrome → **extension**, only when they ask for it.
 - Public page, read or extract → **REST (cf.py)**; needs clicks or network
   capture → **CDP (cf_cdp.mjs)**. Both keep it off the user's machine.
 - Dozens of pages, or a long unattended run, on a site that tolerates headless →

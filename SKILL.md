@@ -1,6 +1,6 @@
 ---
 name: surf
-description: Access ANY website and unlock the web — read pages behind anti-bot walls, see images, watch and download videos, extract structured data, and drive pages logged-in as the user. Use whenever a plain fetch/WebFetch returns 403 or empty, the page is JavaScript-heavy, the content is behind a login (course, shop, dashboard, social), the user asks to open/screenshot/scrape a site, watch or transcribe a video, pull data from a listing, or interact with a page (click, fill, scroll). Routes across Cloudflare Browser Run (cloud), the Claude-in-Chrome extension, and local Playwright, picking the best tool per task. Even when the user does not say "surf".
+description: Access ANY website and unlock the web — read pages behind anti-bot walls, see images, watch and download videos, extract structured data, and drive pages logged-in as the user. Use whenever a plain fetch/WebFetch returns 403 or empty, the page is JavaScript-heavy, the content is behind a login (course, shop, dashboard, social), the user asks to open/screenshot/scrape a site, watch or transcribe a video, pull data from a listing, or interact with a page (click, fill, scroll). Also covers recording a narrated 9:16 demo/tutorial video of a web app. Routes across the Claude desktop app's built-in browser, Cloudflare Browser Run (cloud), local Playwright (with the user's decrypted cookies), and the Claude-in-Chrome extension, picking the best tool per task. Even when the user does not say "surf".
 metadata:
   version: "1.0.0"
 allowed-tools: Bash, Read, AskUserQuestion
@@ -81,20 +81,38 @@ first — it works everywhere, including on sites that block scripts outright:
 
 ## Which tool — decide first (full matrix: `references/methods.md`)
 
+First check what this session has: the **built-in browser** exists only in the
+Claude desktop app (tools `mcp__Claude_Browser__*`, already loaded there). In a
+terminal session it is absent and the table falls back to the rows below it.
+
 | Task | Tool |
 |------|------|
-| **Anything on a site the user is logged into, or that fights bots** | **extension** + `javascript_tool` — their real Chrome, so no auth plumbing and nothing to detect |
-| Public page: read / screenshot / extract, no login needed | **Browser Run REST** (`cf.py`) — cloud, doesn't touch their machine |
-| Public page needing clicks/dynamic content/network capture | **Browser Run CDP** (`cf_cdp.mjs`) |
-| **Bulk** (dozens of pages), long unattended runs, or a site needing their IP that tolerates headless | **local Playwright** (`local_pw.mjs`) — no round-trips, but see the caveats |
-| **Phone-linked app** (WhatsApp/Telegram Web) | **extension** or Baileys — the profile copy does *not* carry these (tested) |
-| CAPTCHA, login wall, or a QR to scan | **Live View** (`live_view.py`) → user solves, then continue |
+| **Look at / click through / test a page, and let the user watch** (their own app on localhost or prod, docs, any public site) | **built-in browser** (`mcp__Claude_Browser__*`) + `javascript_tool` — visible in the app's Browser pane, isolated from the user's Chrome |
+| A site that needs a login, interactively | **built-in browser**, the user signs in once in the pane (it allows OAuth popups) with **Keep cookies** on in the pane's ⋮ menu; or a test account of the project |
+| Extract data from a site the user is logged into in Chrome, headless | **local Playwright** (`local_pw.mjs --cookies <domain>`) — decrypts their Chrome cookies, no login needed |
+| **Bulk** (dozens of pages), long unattended runs | **local Playwright** (`local_pw.mjs`) — no round-trips, but see the caveats |
+| **Record a demo/tutorial video** (9:16, narrated) | **local Playwright** frame capture — `references/recording.md` |
+| Public page: read / screenshot / extract, off the user's machine | **Browser Run REST** (`cf.py`) |
+| Public page needing clicks/dynamic content/network capture, in the cloud | **Browser Run CDP** (`cf_cdp.mjs`) |
+| Act as the user in their real Chrome, **phone-linked apps** (WhatsApp/Telegram Web) | **extension** — only when the user asks for it explicitly (their Chrome profile is shared with another PC); otherwise Baileys |
+| CAPTCHA or a QR to scan in the cloud | **Live View** (`live_view.py`) → user solves, then continue |
 
-**Default to the extension for logged-in work.** It is the user's actual browser:
-no cookie export, no profile copy, no bot wall, no second Chrome competing for
-their RAM, and they can watch or take over. Its only weakness is the per-action
-round-trip — which `javascript_tool` + `browser_batch` largely erase (2min29s →
-30s on a real search).
+**Default to the built-in browser for interactive work.** It runs inside the app,
+so the user sees every step in the Browser pane and can take over; it is a clean
+profile, separate from their Chrome, so nothing leaks into their history or tabs.
+What it does *not* have is the user's logins: cookies from their Chrome can't be
+pushed into it (the tools can't set httpOnly cookies). For a logged-in site either
+the user signs in in the pane once, or you go headless with `local_pw.mjs
+--cookies`. External sites ask for a per-site permission card the first time Claude
+acts there (**Allow once / Always allow**); localhost and project files don't.
+Speed rules are the same as the extension's: `javascript_tool` for data,
+`browser_batch` for steps, screenshot last.
+
+What the built-in browser can't do: export frames for a video (its screenshots come
+back to you as images, not files) and run unattended in bulk. Those stay on
+`local_pw.mjs`. When you use headless Playwright for something the user expected
+to *watch*, say so up front ("gravando em navegador headless, não vai aparecer no
+painel") — otherwise they look at an empty Browser pane and wonder what you did.
 
 Reach for `local_pw.mjs` when round-trips actually dominate: many pages in a
 batch, or a long run nobody is watching. Know the costs before you do — it
@@ -144,9 +162,18 @@ python3 "$SD/scripts/video.py" "<m3u8-url>" --referer "<player-url>" --transcrib
 ```
 Read the `CONTACT_SHEET` to visually "watch"; read the `TRANSCRIPT` to know what's said.
 
-**Logged-in as the user (extension — the default):** load the MCP tools, pick the
-browser, make a tab, then **extract with `javascript_tool`** rather than looking
-at screenshots:
+**Built-in browser (desktop app — the default for interactive work):** tools are
+already loaded. Open with `preview_start {url}` (own tab) or `navigate`; read with
+`get_page_text` / `read_page` / `javascript_tool`; act with `find` refs +
+`computer`, grouped in `browser_batch`. `resize_window {preset:"mobile"}` gives a
+real 375×812 phone (touch + mobile UA; reload after switching) and
+`colorScheme` forces light/dark; reset with `preset:"desktop"` when done.
+`read_console_messages` / `read_network_requests` debug like DevTools. For the
+user's own project, prefer `preview_start {name}` from `.claude/launch.json`
+(dev server, no permission card).
+
+**Extracting in a logged-in page (built-in browser or extension):** make a tab,
+then **extract with `javascript_tool`** rather than looking at screenshots:
 ```js
 // one call returns clean JSON — this is the whole trick
 [...document.querySelectorAll("div.poly-card")].map(el => ({
@@ -184,7 +211,12 @@ Give the `LIVE_URL` to the user to solve/scan, then drive that session:
 `node cf_cdp.mjs --session <id> ...`. Always tell the user when scanning a QR
 links a device (e.g. WhatsApp) and how to remove it later.
 
-**Extension (logged-in / native):** load the MCP tools first
+**Record a narrated demo video (9:16, 1080×1920):** Playwright headless at viewport
+432×768, DPR 2.5, a `Page.captureScreenshot` loop with `clip.scale = 2.5`, TTS per
+scene generated FIRST so each scene holds until its line ends, assembled with
+ffmpeg concat. Full recipe and every trap hit so far: `references/recording.md`.
+
+**Extension (only when the user asks for it):** load the MCP tools first
 (`ToolSearch select:mcp__claude-in-chrome__tabs_context_mcp,...navigate,...computer,...read_page`),
 **call `list_connected_browsers` then `AskUserQuestion` to let the user pick the
 browser** (required), use `browser_batch` to group steps, and prefer search/`find`
@@ -224,7 +256,8 @@ decrypt, ~0.1s vs yt-dlp's ~12s) · `images.py` (find real reference images) ·
 ## References (read the one for the step)
 
 - `references/speed.md` — why browser work drags + the order of attack (read when a task feels slow)
-- `references/methods.md` — the tools in depth + when-to-use + extension how-to
+- `references/methods.md` — the tools in depth + when-to-use + built-in browser / extension how-to
+- `references/recording.md` — record a narrated tutorial/demo video of a web app (mobile 9:16)
 - `references/auth-and-cookies.md` — cookies vs IndexedDB, profiles, phone-linked apps, Baileys
 - `references/video.md` — full video workflow + finding hidden streams
 - `references/pitfalls.md` — consent banners, captcha, rate-limits, click fragility, dead-time
