@@ -67,7 +67,9 @@ The extension is the user's **real Chrome**. That buys things no script can fake
 
 Its one weakness is the per-action round-trip, and rules 1-2 mostly erase it.
 
-So: **extension by default for logged-in or bot-hostile work**; `cf.py` for
+So: **the desktop app's built-in browser by default for interactive work** (same
+tools and same speed rules, visible to the user, isolated from their Chrome; the
+extension only when they ask, for acting inside their real Chrome); `cf.py` for
 public pages (cloud, nothing on their machine); `local_pw.mjs` when round-trips
 genuinely dominate — dozens of pages in a batch, or a long unattended run — on a
 site that tolerates it.
