@@ -96,6 +96,7 @@ terminal session it is absent and the table falls back to the rows below it.
 | Public page needing clicks/dynamic content/network capture, in the cloud | **Browser Run CDP** (`cf_cdp.mjs`) |
 | Act as the user in their real Chrome, **phone-linked apps** (WhatsApp/Telegram Web) | **extension** — only when the user asks for it explicitly (their Chrome profile is shared with another PC); otherwise Baileys |
 | CAPTCHA or a QR to scan in the cloud | **Live View** (`live_view.py`) → user solves, then continue |
+| **Web search with no native WebSearch** (OpenCode, Codex, a server, an agent you are building) | DuckDuckGo lite via **Browser Run** or `curl` — `references/search.md`. Claude Code already has WebSearch: use that |
 
 **Default to the built-in browser for interactive work.** It runs inside the app,
 so the user sees every step in the Browser pane and can take over; it is a clean
@@ -261,3 +262,4 @@ decrypt, ~0.1s vs yt-dlp's ~12s) · `images.py` (find real reference images) ·
 - `references/auth-and-cookies.md` — cookies vs IndexedDB, profiles, phone-linked apps, Baileys
 - `references/video.md` — full video workflow + finding hidden streams
 - `references/pitfalls.md` — consent banners, captcha, rate-limits, click fragility, dead-time
+- `references/search.md` — web search without a native search tool: which engine answers which client, parsing, retries
